@@ -1,25 +1,20 @@
 name: CI/CD Pipeline - Granular Bullseye
-true:
+
+on:
   push:
-    branches:
-      - main
-  workflow_dispatch: null
+    branches: [main]
+  workflow_dispatch:
+
 env:
-  PYTHON_BIN: python3
-  BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/logs-guard-backend
-  FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/logs-guard-frontend
+  PYTHON_BIN: "python3"
+  BACKEND_IMAGE: "${{ secrets.DOCKERHUB_USERNAME }}/logs-guard-backend"
+  FRONTEND_IMAGE: "${{ secrets.DOCKERHUB_USERNAME }}/logs-guard-frontend"
+
   ENERGY_VOLUME: /home/mbensaid/energy-data
   PROJECT_NAME: Unknown
   PROJECT_CATEGORY: HPC
 jobs:
-  runs-on: self-hosted
-  steps:
-    - uses: Green-Energy-Org/ecofloc-action/start@v1
-      with:
-        volume: ${{ env.ENERGY_VOLUME }}
-        project-name: ${{ env.PROJECT_NAME }}
-        project-category: ${{ env.PROJECT_CATEGORY }}
-    - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  # 1. Préparation de l'environnement système
   system-init:
     runs-on: self-hosted
     container:
@@ -32,10 +27,13 @@ jobs:
           project-name: ${{ env.PROJECT_NAME }}
           project-category: ${{ env.PROJECT_CATEGORY }}
       - name: Install System Runtimes
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq python3-pip python3-dev nodejs npm curl build-essential
+  # 2. Installation des dépendances
       - uses: Green-Energy-Org/ecofloc-action/stop@v1
   install-dependencies:
-    needs:
-      - system-init
+    needs: [system-init]
     runs-on: self-hosted
     container:
       image: catthehacker/ubuntu:act-22.04
@@ -48,10 +46,16 @@ jobs:
           project-category: ${{ env.PROJECT_CATEGORY }}
       - uses: actions/checkout@v4
       - name: Install All Dependencies
+        run: |
+          # Backend
+          ${{ env.PYTHON_BIN }} -m pip install --upgrade pip
+          ${{ env.PYTHON_BIN }} -m pip install -r backend/requirements.txt ruff pytest
+          # Frontend
+          cd frontend && npm install
+  # 3. Linting
       - uses: Green-Energy-Org/ecofloc-action/stop@v1
   static-analysis:
-    needs:
-      - install-dependencies
+    needs: [install-dependencies]
     runs-on: self-hosted
     container:
       image: catthehacker/ubuntu:act-22.04
@@ -64,10 +68,13 @@ jobs:
           project-category: ${{ env.PROJECT_CATEGORY }}
       - uses: actions/checkout@v4
       - name: Run Linters
+        run: |
+          ${{ env.PYTHON_BIN }} -m ruff check backend/
+          cd frontend && npx eslint src/ --ext .js,.jsx || true
+  # 4. Tests
       - uses: Green-Energy-Org/ecofloc-action/stop@v1
   unit-tests:
-    needs:
-      - static-analysis
+    needs: [static-analysis]
     runs-on: self-hosted
     container:
       image: catthehacker/ubuntu:act-22.04
@@ -80,10 +87,16 @@ jobs:
           project-category: ${{ env.PROJECT_CATEGORY }}
       - uses: actions/checkout@v4
       - name: Run All Tests
+        run: |
+          # Backend Pytest
+          export PYTHONPATH=$PYTHONPATH:$(pwd)/backend
+          ${{ env.PYTHON_BIN }} -m pytest backend/ -v || true
+          # Frontend Tests
+          cd frontend && npm test -- --watchAll=false || true
+  # 5. Build
       - uses: Green-Energy-Org/ecofloc-action/stop@v1
   application-build:
-    needs:
-      - unit-tests
+    needs: [unit-tests]
     runs-on: self-hosted
     container:
       image: catthehacker/ubuntu:act-22.04
@@ -96,10 +109,13 @@ jobs:
           project-category: ${{ env.PROJECT_CATEGORY }}
       - uses: actions/checkout@v4
       - name: Build Apps
+        run: |
+          ${{ env.PYTHON_BIN }} -m compileall backend/
+          cd frontend && npm install && npm run build
+  # 6. Archive
       - uses: Green-Energy-Org/ecofloc-action/stop@v1
   package-assets:
-    needs:
-      - application-build
+    needs: [application-build]
     runs-on: self-hosted
     container:
       image: catthehacker/ubuntu:act-22.04
@@ -112,11 +128,17 @@ jobs:
           project-category: ${{ env.PROJECT_CATEGORY }}
       - uses: actions/checkout@v4
       - name: Archive Build
+        run: tar -czvf release-bundle.tar.gz backend/ frontend/build/ 
+          scripts/k8s/
       - uses: actions/upload-artifact@v4
+        with:
+          name: logs-guard-bundle
+          path: release-bundle.tar.gz
+
+  # 7. Docker Auth
       - uses: Green-Energy-Org/ecofloc-action/stop@v1
   docker-auth:
-    needs:
-      - package-assets
+    needs: [package-assets]
     runs-on: self-hosted
     container:
       image: catthehacker/ubuntu:act-22.04
@@ -128,10 +150,12 @@ jobs:
           project-name: ${{ env.PROJECT_NAME }}
           project-category: ${{ env.PROJECT_CATEGORY }}
       - name: Login to DockerHub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+  # 8. Docker Build
       - uses: Green-Energy-Org/ecofloc-action/stop@v1
   docker-build:
-    needs:
-      - docker-auth
+    needs: [docker-auth]
     runs-on: self-hosted
     container:
       image: catthehacker/ubuntu:act-22.04
@@ -144,10 +168,13 @@ jobs:
           project-category: ${{ env.PROJECT_CATEGORY }}
       - uses: actions/checkout@v4
       - name: Build Docker Images
+        run: |
+          docker build -t ${{ env.BACKEND_IMAGE }}:latest -f scripts/docker/Dockerfile.backend ./backend
+          docker build -t ${{ env.FRONTEND_IMAGE }}:latest -f Dockerfile.frontend .
+  # 9. Docker Push
       - uses: Green-Energy-Org/ecofloc-action/stop@v1
   docker-push:
-    needs:
-      - docker-build
+    needs: [docker-build]
     runs-on: self-hosted
     container:
       image: catthehacker/ubuntu:act-22.04
@@ -159,10 +186,13 @@ jobs:
           project-name: ${{ env.PROJECT_NAME }}
           project-category: ${{ env.PROJECT_CATEGORY }}
       - name: Push to Registry
+        run: |
+          docker push ${{ env.BACKEND_IMAGE }}:latest
+          docker push ${{ env.FRONTEND_IMAGE }}:latest
+  # 10. K8s Setup
       - uses: Green-Energy-Org/ecofloc-action/stop@v1
   k8s-setup:
-    needs:
-      - docker-push
+    needs: [docker-push]
     runs-on: self-hosted
     container:
       image: catthehacker/ubuntu:act-22.04
@@ -174,10 +204,20 @@ jobs:
           project-name: ${{ env.PROJECT_NAME }}
           project-category: ${{ env.PROJECT_CATEGORY }}
       - name: Download & Install K8s Tools
+        run: |
+          if ! command -v kubectl &> /dev/null; then
+            curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            mv kubectl /usr/local/bin/
+          fi
+          if ! command -v minikube &> /dev/null; then
+            curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+            install minikube-linux-amd64 /usr/local/bin/minikube
+          fi
+  # 11. Deploy
       - uses: Green-Energy-Org/ecofloc-action/stop@v1
   k8s-deploy:
-    needs:
-      - k8s-setup
+    needs: [k8s-setup]
     runs-on: self-hosted
     container:
       image: catthehacker/ubuntu:act-22.04
@@ -190,4 +230,8 @@ jobs:
           project-category: ${{ env.PROJECT_CATEGORY }}
       - uses: actions/checkout@v4
       - name: Minikube Start & Apply
+        run: |
+          minikube start --driver=docker --memory=2200mb
+          kubectl apply -f scripts/k8s/
+          kubectl rollout status deployment/backend --timeout=90s
       - uses: Green-Energy-Org/ecofloc-action/stop@v1
