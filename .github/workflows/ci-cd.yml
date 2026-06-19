@@ -1,26 +1,193 @@
-name: CI/CD Pipeline
-
-on:
+name: CI/CD Pipeline - Granular Bullseye
+true:
   push:
-    branches: [ main ]
-
+    branches:
+      - main
+  workflow_dispatch: null
+env:
+  PYTHON_BIN: python3
+  BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/logs-guard-backend
+  FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/logs-guard-frontend
+  ENERGY_VOLUME: /home/mbensaid/energy-data
+  PROJECT_NAME: Unknown
+  PROJECT_CATEGORY: HPC
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python
-      uses: actions/setup-python@v2
+  runs-on: self-hosted
+  steps:
+    - uses: Green-Energy-Org/ecofloc-action/start@v1
       with:
-        python-version: '3.10'
-    - name: Install dependencies
-      run: |
-        cd backend
-        pip install -r requirements.txt
-    - name: Run tests
-      run: |
-        echo "Tests passed"  # Placeholder for real tests
-    - name: Build Docker images
-      run: |
-        cd scripts/docker
-        docker build -t backend-image -f Dockerfile.backend ../../backend
+        volume: ${{ env.ENERGY_VOLUME }}
+        project-name: ${{ env.PROJECT_NAME }}
+        project-category: ${{ env.PROJECT_CATEGORY }}
+    - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  system-init:
+    runs-on: self-hosted
+    container:
+      image: catthehacker/ubuntu:act-22.04
+      options: --privileged
+    steps:
+      - uses: Green-Energy-Org/ecofloc-action/start@v1
+        with:
+          volume: ${{ env.ENERGY_VOLUME }}
+          project-name: ${{ env.PROJECT_NAME }}
+          project-category: ${{ env.PROJECT_CATEGORY }}
+      - name: Install System Runtimes
+      - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  install-dependencies:
+    needs:
+      - system-init
+    runs-on: self-hosted
+    container:
+      image: catthehacker/ubuntu:act-22.04
+      options: --privileged
+    steps:
+      - uses: Green-Energy-Org/ecofloc-action/start@v1
+        with:
+          volume: ${{ env.ENERGY_VOLUME }}
+          project-name: ${{ env.PROJECT_NAME }}
+          project-category: ${{ env.PROJECT_CATEGORY }}
+      - uses: actions/checkout@v4
+      - name: Install All Dependencies
+      - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  static-analysis:
+    needs:
+      - install-dependencies
+    runs-on: self-hosted
+    container:
+      image: catthehacker/ubuntu:act-22.04
+      options: --privileged
+    steps:
+      - uses: Green-Energy-Org/ecofloc-action/start@v1
+        with:
+          volume: ${{ env.ENERGY_VOLUME }}
+          project-name: ${{ env.PROJECT_NAME }}
+          project-category: ${{ env.PROJECT_CATEGORY }}
+      - uses: actions/checkout@v4
+      - name: Run Linters
+      - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  unit-tests:
+    needs:
+      - static-analysis
+    runs-on: self-hosted
+    container:
+      image: catthehacker/ubuntu:act-22.04
+      options: --privileged
+    steps:
+      - uses: Green-Energy-Org/ecofloc-action/start@v1
+        with:
+          volume: ${{ env.ENERGY_VOLUME }}
+          project-name: ${{ env.PROJECT_NAME }}
+          project-category: ${{ env.PROJECT_CATEGORY }}
+      - uses: actions/checkout@v4
+      - name: Run All Tests
+      - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  application-build:
+    needs:
+      - unit-tests
+    runs-on: self-hosted
+    container:
+      image: catthehacker/ubuntu:act-22.04
+      options: --privileged
+    steps:
+      - uses: Green-Energy-Org/ecofloc-action/start@v1
+        with:
+          volume: ${{ env.ENERGY_VOLUME }}
+          project-name: ${{ env.PROJECT_NAME }}
+          project-category: ${{ env.PROJECT_CATEGORY }}
+      - uses: actions/checkout@v4
+      - name: Build Apps
+      - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  package-assets:
+    needs:
+      - application-build
+    runs-on: self-hosted
+    container:
+      image: catthehacker/ubuntu:act-22.04
+      options: --privileged
+    steps:
+      - uses: Green-Energy-Org/ecofloc-action/start@v1
+        with:
+          volume: ${{ env.ENERGY_VOLUME }}
+          project-name: ${{ env.PROJECT_NAME }}
+          project-category: ${{ env.PROJECT_CATEGORY }}
+      - uses: actions/checkout@v4
+      - name: Archive Build
+      - uses: actions/upload-artifact@v4
+      - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  docker-auth:
+    needs:
+      - package-assets
+    runs-on: self-hosted
+    container:
+      image: catthehacker/ubuntu:act-22.04
+      options: --privileged
+    steps:
+      - uses: Green-Energy-Org/ecofloc-action/start@v1
+        with:
+          volume: ${{ env.ENERGY_VOLUME }}
+          project-name: ${{ env.PROJECT_NAME }}
+          project-category: ${{ env.PROJECT_CATEGORY }}
+      - name: Login to DockerHub
+      - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  docker-build:
+    needs:
+      - docker-auth
+    runs-on: self-hosted
+    container:
+      image: catthehacker/ubuntu:act-22.04
+      options: --privileged
+    steps:
+      - uses: Green-Energy-Org/ecofloc-action/start@v1
+        with:
+          volume: ${{ env.ENERGY_VOLUME }}
+          project-name: ${{ env.PROJECT_NAME }}
+          project-category: ${{ env.PROJECT_CATEGORY }}
+      - uses: actions/checkout@v4
+      - name: Build Docker Images
+      - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  docker-push:
+    needs:
+      - docker-build
+    runs-on: self-hosted
+    container:
+      image: catthehacker/ubuntu:act-22.04
+      options: --privileged
+    steps:
+      - uses: Green-Energy-Org/ecofloc-action/start@v1
+        with:
+          volume: ${{ env.ENERGY_VOLUME }}
+          project-name: ${{ env.PROJECT_NAME }}
+          project-category: ${{ env.PROJECT_CATEGORY }}
+      - name: Push to Registry
+      - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  k8s-setup:
+    needs:
+      - docker-push
+    runs-on: self-hosted
+    container:
+      image: catthehacker/ubuntu:act-22.04
+      options: --privileged
+    steps:
+      - uses: Green-Energy-Org/ecofloc-action/start@v1
+        with:
+          volume: ${{ env.ENERGY_VOLUME }}
+          project-name: ${{ env.PROJECT_NAME }}
+          project-category: ${{ env.PROJECT_CATEGORY }}
+      - name: Download & Install K8s Tools
+      - uses: Green-Energy-Org/ecofloc-action/stop@v1
+  k8s-deploy:
+    needs:
+      - k8s-setup
+    runs-on: self-hosted
+    container:
+      image: catthehacker/ubuntu:act-22.04
+      options: --privileged
+    steps:
+      - uses: Green-Energy-Org/ecofloc-action/start@v1
+        with:
+          volume: ${{ env.ENERGY_VOLUME }}
+          project-name: ${{ env.PROJECT_NAME }}
+          project-category: ${{ env.PROJECT_CATEGORY }}
+      - uses: actions/checkout@v4
+      - name: Minikube Start & Apply
+      - uses: Green-Energy-Org/ecofloc-action/stop@v1
