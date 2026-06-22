@@ -23,6 +23,9 @@ jobs:
     steps:
       - uses: Green-Energy-Org/ecofloc-action/start@v1
         with:
+          image: medyassinebensaid/ecofloc-ebpf:1.4
+        env:
+          DEBUG: true
           volume: ${{ env.ENERGY_VOLUME }}
           project-name: ${{ env.PROJECT_NAME }}
           project-category: ${{ env.PROJECT_CATEGORY }}
